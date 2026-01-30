@@ -39,6 +39,12 @@ app.use(cors({
 }));
 
 app.use(express.json());
+/* =====================
+   ROUTE TEST (RENDER)
+===================== */
+app.get("/", (req, res) => {
+  res.send("Backend Maison Cilia OK 🚀");
+});
 
 const DATA_FILE = path.join(__dirname, "data.json");
 
