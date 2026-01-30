@@ -12,18 +12,20 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Maha123@";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5500";
 
 /* =====================
-   STRIPE (TEST)
+   STRIPE
 ===================== */
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 /* =====================
-   EMAIL (GMAIL)
+   EMAIL (BREVO SMTP)
 ===================== */
 const mailer = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp-relay.brevo.com",
+  port: 587,
+  secure: false,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: process.env.BREVO_USER,
+    pass: process.env.BREVO_PASS
   }
 });
 
@@ -39,6 +41,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
 /* =====================
    ROUTE TEST (RENDER)
 ===================== */
@@ -92,7 +95,7 @@ app.post("/create-checkout", async (req, res) => {
         {
           price_data: {
             currency: "eur",
-            unit_amount: 1000,
+            unit_amount: 1000, // 10 €
             product_data: {
               name: "Acompte rendez-vous — Maison Cilia",
               description: `${service} | ${date} à ${time}`
@@ -104,7 +107,8 @@ app.post("/create-checkout", async (req, res) => {
 
       success_url:
         `${FRONTEND_URL}/success.html` +
-        `?date=${date}&time=${time}` +
+        `?date=${date}` +
+        `&time=${time}` +
         `&service=${encodeURIComponent(service)}` +
         `&firstName=${firstName}` +
         `&lastName=${lastName}` +
@@ -128,26 +132,31 @@ app.post("/confirm", async (req, res) => {
   const { date, time, firstName, lastName, email, service } = req.body;
   const data = readData();
 
-  const slot = data.slots.find(s => s.date === date && s.time === time);
+  const slot = data.slots.find(
+    s => s.date === date && s.time === time
+  );
 
   if (!slot || slot.booked) {
     return res.status(400).json({ error: "Créneau indisponible" });
   }
 
+  // Marquer réservé
   slot.booked = true;
   slot.client = { firstName, lastName, email, service };
-
   writeData(data);
 
+  // Email confirmation
   if (email) {
     try {
       await mailer.sendMail({
-        from: "Maison Cilia <maisoncilia@gmail.com>",
+        from: "Maison Cilia <contact@maisoncilia.com>",
         to: email,
         subject: "✨ Confirmation de votre rendez-vous — Maison Cilia",
         html: `
           <h2>Bonjour ${firstName},</h2>
+
           <p>Votre rendez-vous est <strong>confirmé</strong> ✨</p>
+
           <p>
             <strong>Prestation :</strong> ${service}<br>
             <strong>Date :</strong> ${date}<br>
@@ -155,7 +164,11 @@ app.post("/confirm", async (req, res) => {
             <strong>Adresse :</strong><br>
             Ivry-sur-Seine, Paris
           </p>
-          <p>Merci pour votre confiance 💖<br><strong>Maison Cilia</strong></p>
+
+          <p>
+            Merci pour votre confiance 💖<br>
+            <strong>Maison Cilia</strong>
+          </p>
         `
       });
     } catch (err) {
@@ -220,9 +233,9 @@ app.post("/admin/delete-slot", (req, res) => {
 });
 
 /* =====================
-   START SERVER (IMPORTANT)
+   START SERVER
 ===================== */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 Backend lancé sur le port", PORT);
+  console.log("🚀 Backend Maison Cilia lancé sur le port", PORT);
 });
