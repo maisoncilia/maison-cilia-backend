@@ -5,7 +5,7 @@ const nodemailer = require("nodemailer");
 const mongoose = require("mongoose");
 
 /* =====================
-   CONFIG (ENV)
+   ENV
 ===================== */
 const {
   PORT = 3000,
@@ -18,10 +18,27 @@ const {
 } = process.env;
 
 /* =====================
+   VERIFICATION ENV
+===================== */
+if (
+  !STRIPE_SECRET_KEY ||
+  !EMAIL_USER ||
+  !EMAIL_PASS ||
+  !ADMIN_PASSWORD ||
+  !FRONTEND_URL ||
+  !MONGODB_URI
+) {
+  console.error("❌ Variables d'environnement manquantes");
+  process.exit(1);
+}
+
+/* =====================
    MONGODB
 ===================== */
 mongoose
-  .connect(MONGODB_URI)
+  .connect(MONGODB_URI, {
+    serverSelectionTimeoutMS: 5000
+  })
   .then(() => console.log("✅ MongoDB connecté"))
   .catch(err => {
     console.error("❌ Erreur MongoDB :", err);
@@ -39,6 +56,9 @@ const SlotSchema = new mongoose.Schema({
     service: String
   }
 });
+
+/* 👉 empêche les doublons */
+SlotSchema.index({ date: 1, time: 1 }, { unique: true });
 
 const Slot = mongoose.model("Slot", SlotSchema);
 
@@ -72,7 +92,7 @@ app.use(cors({
 app.use(express.json());
 
 /* =====================
-   ROUTE TEST
+   TEST ROUTE
 ===================== */
 app.get("/", (req, res) => {
   res.send("Backend Maison Cilia OK 🚀");
@@ -106,7 +126,13 @@ app.post("/create-checkout", async (req, res) => {
       mode: "payment",
       customer_email: email || undefined,
 
-      metadata: { date, time, service, firstName, lastName },
+      metadata: {
+        date,
+        time,
+        service,
+        firstName,
+        lastName
+      },
 
       line_items: [
         {
@@ -124,7 +150,8 @@ app.post("/create-checkout", async (req, res) => {
 
       success_url:
         `${FRONTEND_URL}/success.html` +
-        `?date=${date}&time=${time}` +
+        `?date=${encodeURIComponent(date)}` +
+        `&time=${encodeURIComponent(time)}` +
         `&service=${encodeURIComponent(service)}` +
         `&firstName=${encodeURIComponent(firstName)}` +
         `&lastName=${encodeURIComponent(lastName)}` +
@@ -136,7 +163,7 @@ app.post("/create-checkout", async (req, res) => {
     res.json({ url: session.url });
 
   } catch (err) {
-    console.error("Stripe error :", err);
+    console.error("❌ Stripe error :", err);
     res.status(500).json({ error: "Erreur Stripe" });
   }
 });
@@ -159,29 +186,33 @@ app.post("/confirm", async (req, res) => {
     await slot.save();
 
     if (email) {
-      await mailer.sendMail({
-        from: `Maison Cilia <${EMAIL_USER}>`,
-        to: email,
-        subject: "✨ Confirmation de votre rendez-vous — Maison Cilia",
-        html: `
-          <h2>Bonjour ${firstName},</h2>
-          <p>Votre rendez-vous est <strong>confirmé</strong> ✨</p>
-          <p>
-            <strong>Prestation :</strong> ${service}<br>
-            <strong>Date :</strong> ${date}<br>
-            <strong>Heure :</strong> ${time}<br><br>
-            <strong>Adresse :</strong><br>
-            Ivry-sur-Seine, Paris
-          </p>
-          <p>Merci pour votre confiance 💖<br><strong>Maison Cilia</strong></p>
-        `
-      });
+      try {
+        await mailer.sendMail({
+          from: `Maison Cilia <${EMAIL_USER}>`,
+          to: email,
+          subject: "✨ Confirmation de votre rendez-vous — Maison Cilia",
+          html: `
+            <h2>Bonjour ${firstName},</h2>
+            <p>Votre rendez-vous est <strong>confirmé</strong> ✨</p>
+            <p>
+              <strong>Prestation :</strong> ${service}<br>
+              <strong>Date :</strong> ${date}<br>
+              <strong>Heure :</strong> ${time}<br><br>
+              <strong>Adresse :</strong><br>
+              Ivry-sur-Seine, Paris
+            </p>
+            <p>Merci pour votre confiance 💖<br><strong>Maison Cilia</strong></p>
+          `
+        });
+      } catch (mailErr) {
+        console.error("⚠️ Erreur email :", mailErr);
+      }
     }
 
     res.json({ success: true });
 
   } catch (err) {
-    console.error("Confirm error :", err);
+    console.error("❌ Confirm error :", err);
     res.status(500).json({ error: "Erreur confirmation" });
   }
 });
@@ -211,8 +242,12 @@ app.post("/admin/add-slot", async (req, res) => {
     return res.status(400).json({ error: "Date/heure manquantes" });
   }
 
-  await Slot.create({ date, time });
-  res.json({ success: true });
+  try {
+    await Slot.create({ date, time });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: "Créneau déjà existant" });
+  }
 });
 
 /* =====================
